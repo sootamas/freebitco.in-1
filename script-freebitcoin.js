@@ -5,10 +5,11 @@ var startTime; // registra a hora que iniciou para marcar a duração do process
 var startBalance; // registra a quantia inicial de BTC para calcular o lucro após o processo
 var stopped = false; // flag que irá parar o processo caso true
 var hiFlag = false; // quando true, a aposta será em HI, caso false, será em LO
+var currentBet;
 var resultados = []; // registra em cada rodada, se ganhou ou não e o resultado como 1 caso HI, -1 caso LO e 0 caso tenha caído na na área central
 var victorySec = 0; // contador de vitórias e derrotas em sequência (derrotas em negativo)
 
-var startValue = '0.00000001'; // Don't lower the decimal point more than 4x of current balance
+var startValue = 0.00000001; // Don't lower the decimal point more than 4x of current balance
 var minWait = 222; // tempo mínimo entre uma rodada e outra
 var maxWait = 888; // espera máxima, que na verdade será maxWait + minWait
 var stopBefore = 1; // In minutes for timer before stopping redirect on webpage
@@ -22,8 +23,8 @@ var midFlag = false; // utilizada em alguns procedimentos de "quebra" de MID
 var $loButton = $('#double_your_btc_bet_lo_button');
 var $hiButton = $('#double_your_btc_bet_hi_button');
 
-function multiply(balance,current){
-	var multiply = parseFloat((current * 2).toFixed(8)); // pega a aposta corrente e dobra
+function multiply(balance){
+	var multiply = parseFloat((currentBet * 2).toFixed(8)); // pega a aposta corrente e dobra
 	if (multiply > balance - valorSeguranca) { //caso multiply seja maior que o limite que pode ser apostado
 		if (resetFlag) { 
 			//caso resetFlag esteja ativada, toda vez que a aposta estourar o limite, irá retornar ao startValue
@@ -33,13 +34,13 @@ function multiply(balance,current){
 		else {
 			//caso resetFlag esteja desativada, toda vez que a aposta estourar o limite, irá reduzí-la pela metade, 
 			//continuamente, até que seja um valor que possa ser apostado e seja superior a startValue
-			var stValue = parseFloat(startValue)
 			do {
 				multiply = multiply / 2;
-			} while (multiply >= 0.00000001 && multiply > balance - valorSeguranca)
+			} while (multiply >= startValue && multiply > balance - valorSeguranca)
 		}
 	} 
 	$('#double_your_btc_stake').val(multiply.toFixed(8));
+	currentBet = multiply;
 }
 function getRandomWait(){
 	var wait = Math.floor(Math.random() * maxWait ) + minWait;
@@ -49,6 +50,7 @@ function getRandomWait(){
 function startGame(){
 	startTime = new Date().getTime();
 	startBalance = parseFloat($('#balance').text()); 
+	currentBet = startValue;
 	resultados = [];
 	victorySec = 0;
 	stopped = false;
@@ -67,10 +69,25 @@ function toggleHiLo () {
 	hiFlag ? hiFlag = false : hiFlag = true;
 }
 function reset(){
-	$('#double_your_btc_stake').val(startValue);
+	$('#double_your_btc_stake').val(startValue.toFixed(8));
+	currentBet = startValue;
 }
-
-function funcaoPreRodada(resultado) {
+//apenas faz uma aposta baixa predefinida, pressupondo que seja mais provável uma perda na próxima jogada.
+function saltTurn () {
+	$('#double_your_btc_stake').val(startValue.toFixed(8));
+	console.log("Salt Turn!");
+}
+function funcaoPreRodada() {
+	var ant = analiseResultadosAnterioresSeguidos();
+	if (ant != null) {
+		if (ant.result == 0 && ant.repeat > 1)
+			midFlag = true;
+		else {
+			midFlag = false;
+			if (!ant.win && ant.repeat % 3 == 0)
+				toggleHiLo();
+		}
+	}
 	//if (victorySec % 4 == 0) 
 		//toggleHiLo();
 }
@@ -108,12 +125,16 @@ $('#double_your_btc_bet_win').unbind();
 $('#double_your_btc_bet_lose').bind("DOMSubtreeModified",function(event){
 	if( $(event.currentTarget).is(':contains("lose")') ){
 		var balance = parseFloat($('#balance').text()); 
-		var current = parseFloat($('#double_your_btc_stake').val());
-		var payout = parseFloat($("#double_your_btc_payout_multiplier").val());
-		var winProfit = getWinProfit(current,payout);
+		//var current = currentBet; //parseFloat($('#double_your_btc_stake').val()) ;
+		//var payout = parseFloat($("#double_your_btc_payout_multiplier").val());
+		//var winProfit = getWinProfit(payout);
 		var resultado = analiseResultado();
 		
 		resultados.push ({win: false, result: resultado});
+		
+		console.log('LOST! '+ parseFloat($('#double_your_btc_stake').val()).toFixed(8) + " " + (resultado ? (resultado > 0 ? "HI" : "LO") : "MID"));
+		
+		funcaoPreRodada();
 		
 		if( stopped ){
 			stopped = false;
@@ -126,15 +147,14 @@ $('#double_your_btc_bet_lose').bind("DOMSubtreeModified",function(event){
 		}
 		else { // caso venha de uma derrota, multiply
 			victorySec--;
-			multiply(balance,current);
+			if (!midFlag)
+				multiply(balance);
+			else 
+				saltTurn();
 		}
-		
-		console.log('LOST! '+ current.toFixed(8) + " " + (resultado ? (resultado > 0 ? "HI" : "LO") : "MID"));
 		
 		if (paradaProgramada(balance))
 			return false;
-		
-		funcaoPreRodada(resultado);
 		
 		setTimeout(function(){
 			hiFlag ? $hiButton.trigger('click') : $loButton.trigger('click');
@@ -145,38 +165,40 @@ $('#double_your_btc_bet_lose').bind("DOMSubtreeModified",function(event){
 $('#double_your_btc_bet_win').bind("DOMSubtreeModified",function(event){
 	if( $(event.currentTarget).is(':contains("win")') ){
 		var balance = parseFloat($('#balance').text()); 
-		var current = parseFloat($('#double_your_btc_stake').val());
+		//var current = currentBet; //parseFloat($('#double_your_btc_stake').val());
 		var payout = parseFloat($("#double_your_btc_payout_multiplier").val());
-		var winProfit = getWinProfit(current,payout);
+		var winProfit = getWinProfit(payout,parseFloat($('#double_your_btc_stake').val()));
 		var resultado = analiseResultado();
 		
 		resultados.push ({win: true, result: resultado});
 		
+		console.log('WON! '+ winProfit.toFixed(8) + " " + (resultado ? (resultado > 0 ? "HI" : "LO") : "MID"));
+		
+		funcaoPreRodada();
+		
 		if( stopBeforeRedirect() )
 			return;
 		if (victorySec < 0) { //  retorna a aposta ao inicio depois de derrotas
-			reset();
-			victorySec = 0;
+			if (!midFlag) {
+				reset();
+				victorySec = 1;
+			}
 			if( stopped ){
 				stopped = false;
 				return false;
 			}
 		}
 		else if (victorySec%2 == 0) { // dobra a aposta a cada duas vitórias consecutivas 
-			multiply(balance,current);
+			multiply(balance);
+			victorySec++;
 		}
 		// else contunua apostando
-			
-		victorySec++;
 		
-		console.log('WON! '+ winProfit.toFixed(8) + " " + (resultado ? (resultado > 0 ? "HI" : "LO") : "MID"));
 		
 		salvarLucro (winProfit);
 		
 		if (paradaProgramada(balance))
 			return false;
-		
-		funcaoPreRodada(resultado);
 		
 		setTimeout(function(){
 			hiFlag ? $hiButton.trigger('click') : $loButton.trigger('click');
@@ -184,8 +206,11 @@ $('#double_your_btc_bet_win').bind("DOMSubtreeModified",function(event){
 	}
 });
 
-function getWinProfit(current,payout) {
-	current = parseInt(current * 100000000);
+function getWinProfit(payout, current) {
+	if (current)
+		current = parseInt(current * 100000000);
+	else
+	    current = parseInt(currentBet * 100000000);
 	return Math.floor(payout * current - current) / 100000000;
 }
 
@@ -215,6 +240,19 @@ function analiseResultado() {
 		return -1;
 	else 
 		return 0;
+}
+// analisa e retorna quantas vezes seguidas houve o mesmo resultado: {win: win, result: HiMidLo, repeat: repetição}
+function analiseResultadosAnterioresSeguidos () {
+	var p = resultados.length -1;
+	if (p >= 0) {
+		var win = resultados[p].win;
+		var hiMidLo = resultados[p].result;
+		do {
+			p--;
+		}while (p > 0 && resultados[p].win == win && resultados[p].result == hiMidLo) 
+		return {win: win, result: hiMidLo, repeat: (resultados.length - p -1)}
+	}
+	return null;
 }
 
 function geraAposta (aposta, pLucro, tMaximo){
