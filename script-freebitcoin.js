@@ -83,9 +83,11 @@ function funcaoPreRodada() {
 		if (ant.result == 0 && ant.repeat > 1)
 			midFlag = true;
 		else {
-			midFlag = false;
-			if (!ant.win && ant.repeat % 3 == 0)
-				toggleHiLo();
+			if (!ant.win) {
+				midFlag = false;
+				if (ant.repeat % 3 == 0)
+					toggleHiLo();
+			}
 		}
 	}
 	//if (victorySec % 4 == 0) 
